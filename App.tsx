@@ -1,10 +1,11 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import type { FormFields, GenerationResult, Template, Ratio, InlineData } from './types';
 import { generateAdImage, generateAdCopy } from './services/geminiService';
 
 // To satisfy TypeScript for CDN-loaded libraries
 declare var JSZip: any;
 declare var saveAs: any;
+declare var Cropper: any;
 
 // --- Helper Functions ---
 const fileToInlineData = (file: File): Promise<InlineData> => {
@@ -20,6 +21,20 @@ const fileToInlineData = (file: File): Promise<InlineData> => {
         reader.onerror = (error) => reject(error);
     });
 };
+
+const dataURLtoFile = (dataurl: string, filename: string): File => {
+    const arr = dataurl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    if (!mimeMatch) throw new Error("Could not parse mime type");
+    const mime = mimeMatch[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
+}
 
 const downloadImage = (src: string, filename: string) => {
     const link = document.createElement('a');
@@ -56,6 +71,11 @@ const ErrorIcon: React.FC<{ className?: string }> = ({ className }) => (
     </svg>
 );
 
+const RotateCwIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
+    </svg>
+);
 
 const Spinner: React.FC<{ className?: string }> = ({ className = 'w-6 h-6' }) => (
     <svg className={`animate-spin ${className}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -92,6 +112,68 @@ const Footer: React.FC = () => (
     </footer>
 );
 
+interface ImageEditorModalProps {
+    imageSrc: string;
+    onSave: (editedFile: File) => void;
+    onClose: () => void;
+}
+
+const ImageEditorModal: React.FC<ImageEditorModalProps> = ({ imageSrc, onSave, onClose }) => {
+    const imageRef = useRef<HTMLImageElement>(null);
+    const cropperRef = useRef<any>(null);
+
+    useEffect(() => {
+        if (imageRef.current) {
+            cropperRef.current = new Cropper(imageRef.current, {
+                aspectRatio: NaN, // Free crop
+                viewMode: 1,
+                background: false,
+                responsive: true,
+                autoCropArea: 0.8,
+                zoomable: true,
+            });
+        }
+        return () => {
+            cropperRef.current?.destroy();
+        };
+    }, [imageSrc]);
+
+    const handleRotate = () => {
+        cropperRef.current?.rotate(90);
+    };
+
+    const handleSave = () => {
+        if (cropperRef.current) {
+            const dataUrl = cropperRef.current.getCroppedCanvas().toDataURL('image/png');
+            const file = dataURLtoFile(dataUrl, 'edited-product.png');
+            onSave(file);
+        }
+    };
+    
+    return (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-800 rounded-2xl shadow-xl w-full max-w-2xl border border-slate-700">
+                <div className="p-4 border-b border-slate-700">
+                    <h3 className="text-lg font-semibold text-white">Edit Product Image</h3>
+                </div>
+                <div className="p-4 max-h-[60vh] overflow-hidden">
+                    <img ref={imageRef} src={imageSrc} alt="Image editor" style={{ maxWidth: '100%' }} />
+                </div>
+                 <div className="p-4 flex justify-between items-center bg-slate-900/50 rounded-b-2xl">
+                    <button onClick={handleRotate} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-slate-600 rounded-md hover:bg-slate-700 transition-colors">
+                        <RotateCwIcon className="w-5 h-5" />
+                        Rotate
+                    </button>
+                    <div className="flex gap-3">
+                         <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-300 bg-transparent rounded-md hover:bg-slate-700 transition-colors">Cancel</button>
+                        <button onClick={handleSave} className="px-6 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 interface ConfigFormProps {
     fields: FormFields;
     setFields: React.Dispatch<React.SetStateAction<FormFields>>;
@@ -108,11 +190,13 @@ interface ConfigFormProps {
     onGenerate: () => void;
     isLoading: boolean;
     productFile: File | null;
-    setProductFile: (file: File | null) => void;
+    onProductFileChange: (file: File) => void;
     logoFile: File | null;
     setLogoFile: (file: File | null) => void;
     autoCopyProduct: string;
     setAutoCopyProduct: (product: string) => void;
+    adCopyLanguage: 'id' | 'en';
+    setAdCopyLanguage: (lang: 'id' | 'en') => void;
     onGenerateAdCopy: () => void;
     isCopyLoading: boolean;
 }
@@ -121,8 +205,9 @@ const ConfigForm: React.FC<ConfigFormProps> = (props) => {
     const {
         fields, setFields, brandColor, setBrandColor, template, setTemplate,
         ratios, setRatios, watermark, setWatermark, batchSize, setBatchSize,
-        onGenerate, isLoading, productFile, setProductFile, logoFile, setLogoFile,
-        autoCopyProduct, setAutoCopyProduct, onGenerateAdCopy, isCopyLoading
+        onGenerate, isLoading, productFile, onProductFileChange, logoFile, setLogoFile,
+        autoCopyProduct, setAutoCopyProduct, adCopyLanguage, setAdCopyLanguage,
+        onGenerateAdCopy, isCopyLoading
     } = props;
     
     const productPreview = useMemo(() => productFile ? URL.createObjectURL(productFile) : null, [productFile]);
@@ -140,7 +225,14 @@ const ConfigForm: React.FC<ConfigFormProps> = (props) => {
         );
     };
 
+    const handleProductUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            onProductFileChange(e.target.files[0]);
+        }
+    };
+
     const isGenerateDisabled = !productFile || !fields.headline || ratios.length === 0 || isLoading;
+    const TEMPLATE_OPTIONS: Template[] = ['Hero', 'Price Tag', 'UGC Style', 'Minimalist', 'Bold Typography', 'Benefit-focused'];
 
     return (
         <div className="lg:col-span-1 space-y-6 p-6 bg-slate-900/50 border border-slate-800 rounded-2xl shadow-lg">
@@ -156,8 +248,8 @@ const ConfigForm: React.FC<ConfigFormProps> = (props) => {
                                 {productPreview ? <img src={productPreview} alt="Product Preview" className="mx-auto h-24 w-24 object-cover rounded-md"/> : <UploadIcon className="mx-auto h-12 w-12 text-slate-500" />}
                                 <div className="flex text-sm text-slate-400">
                                     <label htmlFor="product-upload" className="relative cursor-pointer bg-slate-800 rounded-md font-medium text-blue-400 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-offset-slate-900 focus-within:ring-blue-500 px-1">
-                                        <span>Upload a file</span>
-                                        <input id="product-upload" name="product-upload" type="file" className="sr-only" accept="image/png, image/jpeg" onChange={e => setProductFile(e.target.files?.[0] || null)} />
+                                        <span>Upload & Edit</span>
+                                        <input id="product-upload" name="product-upload" type="file" className="sr-only" accept="image/png, image/jpeg" onChange={handleProductUpload} />
                                     </label>
                                 </div>
                                 <p className="text-xs text-slate-500">PNG, JPG up to 10MB</p>
@@ -188,9 +280,7 @@ const ConfigForm: React.FC<ConfigFormProps> = (props) => {
                  <div>
                     <label htmlFor="template" className="block text-sm font-medium text-blue-400">2. Template</label>
                     <select id="template" value={template} onChange={e => setTemplate(e.target.value as Template)} className="mt-1 block w-full pl-3 pr-10 py-2 text-base bg-slate-800 border-slate-600 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md text-white">
-                        <option>Hero</option>
-                        <option>Price Tag</option>
-                        <option>UGC Style</option>
+                        {TEMPLATE_OPTIONS.map(opt => <option key={opt}>{opt}</option>)}
                     </select>
                 </div>
                 <div>
@@ -210,7 +300,13 @@ const ConfigForm: React.FC<ConfigFormProps> = (props) => {
              <div>
                 <h2 className="text-lg font-semibold text-blue-400 border-b border-slate-700 pb-2 mb-4">4. Ad Copy</h2>
                 <div className="mb-6 bg-slate-800/50 p-3 rounded-lg">
-                    <label htmlFor="auto-copy-product" className="block text-sm font-medium text-slate-300 mb-2">Generate Ad Copy Otomatis</label>
+                     <div className="flex justify-between items-center mb-2">
+                        <label htmlFor="auto-copy-product" className="block text-sm font-medium text-slate-300">Generate Ad Copy Otomatis</label>
+                        <select value={adCopyLanguage} onChange={e => setAdCopyLanguage(e.target.value as 'id' | 'en')} className="text-xs bg-slate-700 border-slate-600 rounded-md focus:ring-blue-500 focus:border-blue-500 py-1">
+                            <option value="id">Bahasa Indonesia</option>
+                            <option value="en">English</option>
+                        </select>
+                     </div>
                     <div className="flex gap-2">
                         <input id="auto-copy-product" type="text" value={autoCopyProduct} onChange={e => setAutoCopyProduct(e.target.value)} placeholder="Sebutkan produk atau layanan Anda" className="input-style flex-grow" disabled={isCopyLoading}/>
                         <button onClick={onGenerateAdCopy} className="flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 disabled:cursor-wait font-semibold" disabled={isCopyLoading || !autoCopyProduct}>
@@ -391,8 +487,11 @@ export default function App() {
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [autoCopyProduct, setAutoCopyProduct] = useState('');
     const [isCopyLoading, setIsCopyLoading] = useState(false);
+    const [adCopyLanguage, setAdCopyLanguage] = useState<'id' | 'en'>('id');
     const [error, setError] = useState<string | null>(null);
     const [progress, setProgress] = useState({ current: 0, total: 0 });
+    const [isEditingImage, setIsEditingImage] = useState(false);
+    const [imageToEdit, setImageToEdit] = useState<string | null>(null);
 
 
     const handleGenerateAdCopy = useCallback(async () => {
@@ -400,7 +499,7 @@ export default function App() {
         setIsCopyLoading(true);
         setError(null);
         try {
-            const adCopy = await generateAdCopy(autoCopyProduct);
+            const adCopy = await generateAdCopy(autoCopyProduct, adCopyLanguage);
             if (adCopy) {
                 setFields(prev => ({
                     ...prev,
@@ -415,7 +514,22 @@ export default function App() {
         } finally {
             setIsCopyLoading(false);
         }
-    }, [autoCopyProduct]);
+    }, [autoCopyProduct, adCopyLanguage]);
+    
+    const handleProductFileChange = (file: File) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            setImageToEdit(reader.result as string);
+            setIsEditingImage(true);
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const handleImageEditorSave = (editedFile: File) => {
+        setProductFile(editedFile);
+        setIsEditingImage(false);
+        setImageToEdit(null);
+    };
 
     const handleGenerate = useCallback(async () => {
         if (!productFile || ratios.length === 0) return;
@@ -498,9 +612,10 @@ export default function App() {
                         batchSize={batchSize} setBatchSize={setBatchSize}
                         onGenerate={handleGenerate}
                         isLoading={isLoading}
-                        productFile={productFile} setProductFile={setProductFile}
+                        productFile={productFile} onProductFileChange={handleProductFileChange}
                         logoFile={logoFile} setLogoFile={setLogoFile}
                         autoCopyProduct={autoCopyProduct} setAutoCopyProduct={setAutoCopyProduct}
+                        adCopyLanguage={adCopyLanguage} setAdCopyLanguage={setAdCopyLanguage}
                         onGenerateAdCopy={handleGenerateAdCopy}
                         isCopyLoading={isCopyLoading}
                     />
@@ -515,6 +630,14 @@ export default function App() {
             </main>
 
             <Footer />
+
+            {isEditingImage && imageToEdit && (
+                <ImageEditorModal
+                    imageSrc={imageToEdit}
+                    onSave={handleImageEditorSave}
+                    onClose={() => setIsEditingImage(false)}
+                />
+            )}
 
             {/* Custom input styles */}
             <style>{`

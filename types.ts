@@ -1,4 +1,3 @@
-
 export interface FormFields {
   headline: string;
   subheadline: string;
@@ -14,7 +13,7 @@ export interface GenerationResult {
   ratio: string;
 }
 
-export type Template = 'Hero' | 'Price Tag' | 'UGC Style';
+export type Template = 'Hero' | 'Price Tag' | 'UGC Style' | 'Minimalist' | 'Bold Typography' | 'Benefit-focused';
 export type Ratio = '1:1' | '4:5' | '9:16' | '16:9';
 
 export interface InlineData {

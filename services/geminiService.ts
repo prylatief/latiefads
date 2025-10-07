@@ -17,6 +17,12 @@ function getTemplateDescription(template: Template): string {
             return "Create a 'Price Tag' style ad. The product should be clearly visible, with a visually appealing graphic element resembling a price tag or label near it. This tag must clearly display the price and discount.";
         case 'UGC Style':
             return "Create a 'UGC (User-Generated Content)' style ad. The final image should look authentic and less like a polished ad. It could resemble a high-quality Instagram story, a customer photo, or a screenshot of a positive review incorporating the product image.";
+        case 'Minimalist':
+            return "Create a 'Minimalist' style ad. Use a lot of negative space, clean typography, and a simple color palette. The product should be the star, presented elegantly without clutter.";
+        case 'Bold Typography':
+            return "Create a 'Bold Typography' style ad. The headline should be the dominant visual element, using a large, attention-grabbing font. The product image should complement the text, not compete with it.";
+        case 'Benefit-focused':
+            return "Create a 'Benefit-focused' style ad. Besides the main headline, visually highlight 2-3 key benefits of the product using icons or short text callouts. The layout should be clean and easy to scan.";
         default:
             return "Create a standard product advertisement.";
     }
@@ -32,11 +38,15 @@ const getCurrencySymbol = (currency: string): string => {
     return symbols[currency] || '';
 }
 
-export const generateAdCopy = async (productName: string): Promise<Partial<FormFields> | null> => {
+export const generateAdCopy = async (productName: string, language: 'id' | 'en'): Promise<Partial<FormFields> | null> => {
     try {
+        const languageInstruction = language === 'id'
+            ? "Generate the response in Indonesian."
+            : "Generate the response in English.";
+
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: `Generate a compelling and concise headline, subheadline, and call-to-action (CTA) for a product described as: "${productName}". The tone should be persuasive and suitable for social media ads.`,
+            contents: `Generate a compelling and concise headline, subheadline, and call-to-action (CTA) for a product described as: "${productName}". The tone should be persuasive and suitable for social media ads. ${languageInstruction}`,
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {
