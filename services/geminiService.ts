@@ -1,5 +1,4 @@
-
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI, Modality, Type } from "@google/genai";
 import type { FormFields, Template, Ratio, InlineData } from '../types';
 
 if (!process.env.API_KEY) {
@@ -23,6 +22,45 @@ function getTemplateDescription(template: Template): string {
     }
 }
 
+const getCurrencySymbol = (currency: string): string => {
+    const symbols: { [key: string]: string } = {
+        'IDR': 'Rp',
+        'USD': '$',
+        'EUR': '€',
+        'GBP': '£',
+    };
+    return symbols[currency] || '';
+}
+
+export const generateAdCopy = async (productName: string): Promise<Partial<FormFields> | null> => {
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: `Generate a compelling and concise headline, subheadline, and call-to-action (CTA) for a product described as: "${productName}". The tone should be persuasive and suitable for social media ads.`,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        headline: { type: Type.STRING, description: "A short, catchy headline (5-7 words)." },
+                        subheadline: { type: Type.STRING, description: "A brief, descriptive subheadline (8-12 words)." },
+                        cta: { type: Type.STRING, description: "A clear, action-oriented call to action (2-3 words)." },
+                    },
+                    required: ["headline", "subheadline", "cta"],
+                },
+            },
+        });
+
+        const jsonText = response.text.trim();
+        const adCopy = JSON.parse(jsonText);
+        return adCopy;
+
+    } catch (error) {
+        console.error("Error generating ad copy with Gemini:", error);
+        return null;
+    }
+};
+
 export const generateAdImage = async (
     productImage: InlineData,
     logoImage: InlineData | null,
@@ -31,8 +69,11 @@ export const generateAdImage = async (
     ratio: Ratio,
     brandColor: string,
     watermark: boolean
-): Promise<string | null> => {
+): Promise<string> => {
     try {
+        const priceString = fields.price ? `${getCurrencySymbol(fields.currency)} ${Number(fields.price).toLocaleString()}` : '';
+        const discountString = fields.discount ? `${fields.discount}% OFF` : '';
+
         const prompt = `
             You are an expert graphic designer creating a high-converting photo ad for Meta platforms (Facebook & Instagram).
             Your task is to use the provided product image and create a visually stunning, complete ad creative.
@@ -43,8 +84,8 @@ export const generateAdImage = async (
             3.  **Text Elements:** Integrate the following text naturally into the design. Use a modern, readable sans-serif font.
                 *   Headline: "${fields.headline}"
                 *   Subheadline: "${fields.subheadline}"
-                *   Price: "${fields.price}"
-                *   Discount: "${fields.discount}% OFF"
+                *   Price: "${priceString}"
+                *   Discount: "${discountString}"
                 *   Call to Action (CTA): "${fields.cta}"
             4.  **Branding:**
                 *   The primary brand color is ${brandColor}. Use this for accents, CTA buttons, text highlights, or graphic elements.
@@ -54,7 +95,7 @@ export const generateAdImage = async (
             **CRITICAL INSTRUCTIONS:**
             - The final output MUST be a single, complete image in a ${ratio} aspect ratio.
             - Do not output text, descriptions, or code. Generate the image directly.
-            - Ensure the ad is clean, modern, and looks professionally designed.
+            - Ensure the ad is clean, modern, and looks professionally designed. Only include text elements if they have content.
         `;
 
         const parts: any[] = [
@@ -74,16 +115,22 @@ export const generateAdImage = async (
             },
         });
 
-        // The API might return multiple parts, find the image part.
         for (const part of response.candidates[0].content.parts) {
             if (part.inlineData && part.inlineData.mimeType.startsWith('image/')) {
                 return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
             }
         }
-        return null; // No image found in response
+        
+        throw new Error("The API response did not contain a valid image.");
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error generating image with Gemini:", error);
-        return null;
+        const errorMessage = error?.message || "An unknown error occurred.";
+
+        if (errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("quota")) {
+            throw new Error("You have exceeded the API request limit. Please wait a moment or reduce the batch size.");
+        }
+
+        throw new Error(errorMessage);
     }
 };

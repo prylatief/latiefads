@@ -5,6 +5,7 @@ export interface FormFields {
   price: string;
   discount: string;
   cta: string;
+  currency: string;
 }
 
 export interface GenerationResult {
