@@ -1,0 +1,5 @@
+{
+  "name": "Latief Ads — Affiliate Photo Ads Generator",
+  "description": "A web application to generate variations of affiliate product photos for Meta Ads (Facebook & Instagram), allowing users to upload product images, add text, select templates, aspect ratios, brand colors, and an optional watermark.",
+  "requestFramePermissions": []
+}
